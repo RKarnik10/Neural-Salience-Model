@@ -37,7 +37,7 @@ Two headline findings:
 
 When you compare where each model puts its weight, they converge on the same physics. XGBoost independently ranks TTC and loom rate at the top — matching the SC's known emphasis on looming — with no architectural prior. And when SC-Net is allowed to *learn* the weighting of the four bio channels rather than using the fixed literature values, it promotes TTC and proximity and demotes loom: on this task, once TTC is present, loom's marginal contribution is small (both encode "approaching fast"). The fixed SC prior isn't optimal, but it lands in the right neighborhood.
 
-![feature importance comparison](data/feature_importance.png)
+![feature importance comparison](assets/feature_importance.png)
 *Where each model puts its weight. The first two panels weight the same four SC channels — fixed (bio) vs. learned (SC-Net); the last two weight the seven raw features.*
 
 ## Project structure
