@@ -125,3 +125,27 @@ The argument so far: **the SC knows which features matter** (loom rate and TTC d
 The architectural model tests the next layer of the hypothesis: does the SC's **processing structure** — the way signals flow through superficial → intermediate layers, get modulated by lateral inhibition, and collapse into a winner — add meaningful performance on top of just having the right feature weights?
 
 If yes, that's strong evidence the SC's design is computationally justified end-to-end, not just in its input selection. The target is closing the gap from NDCG@3=0.880 toward 0.970 while keeping the model interpretable and traceable to neuroscience.
+
+---
+
+## v3 Results — the architectural SC network (2026-07-24)
+
+**The question above is now answered: yes.** Keeping the four bio channels fixed and adding only (a) an integration layer with pairwise interaction terms and (b) a within-scene winner-take-all competition takes the model from the v2 bio baseline to:
+
+| Model | AUC | Top-1 acc | NDCG@3 | Urgency ρ |
+|---|---|---|---|---|
+| Bio-Inspired (SC), fixed weights | 0.916 | 0.740 | 0.880 | +0.447 |
+| **SC-Net (v3), architectural** | **0.964** | **0.844** | **0.953** | **+0.780** |
+| XGBoost (ceiling) | 0.974 | 0.870 | 0.970 | +0.735 |
+
+**What each architectural ingredient bought:**
+
+1. **Interactions closed most of the ranking gap.** NDCG@3 went 0.880 → 0.953, i.e. 81% of the way to the XGBoost ceiling — with no new input features. This is the cleanest possible confirmation of v2's central prediction ("the next upgrade isn't more features, it's interactions"). The `AND` structure the trees were exploiting is now captured by the integration layer's coincidence-detection terms.
+
+2. **Winner-take-all bought urgency calibration.** SC-Net's urgency correlation (+0.780) is the highest of *any* model in the ladder, XGBoost included. The listwise objective is a competition to attend the soonest collision, so it optimizes exactly the quantity the urgency metric scores. This is the strongest single piece of evidence that the SC's lateral-inhibition dynamic is computationally justified, not just anatomically present.
+
+3. **It stayed interpretable, and told us the prior was slightly off.** Permutation importance over the four channels shows the trained net promotes TTC and proximity and demotes loom relative to the fixed SC weights. Loom isn't useless — it's largely redundant *given TTC*, since both encode "approaching fast." So the SC's literature weighting is in the right neighborhood but over-weights loom for this particular task.
+
+**The negative-result guard still holds.** v2 worried that a bigger network would just be "XGBoost with worse interpretability." SC-Net rules that out from the other side: it matches the generic v2 MLP on ranking (0.953 vs 0.955) while beating it on urgency (+0.780 vs +0.660), using interpretable bio channels and an architecture every stage of which maps to SC anatomy. The performance comes from *biological structure*, not from being a neural net.
+
+**What's left for v4.** The remaining ~1.5 NDCG@3 points to XGBoost are the deepest interaction structure and, plausibly, the difference between a single-shot softmax and a *recurrent* lateral-inhibition dynamic that settles a winner over time. That, plus temporal input (trajectories instead of snapshots), is the natural next test.
