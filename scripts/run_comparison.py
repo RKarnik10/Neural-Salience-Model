@@ -42,8 +42,10 @@ from src.visualize import plot_feature_importance_comparison, plot_model_ladder,
 
 N_SCENES = 600
 SEED = 0
-OUT_DIR = ROOT / "data"
+OUT_DIR = ROOT / "data"        # raw run artifacts (gitignored)
 OUT_DIR.mkdir(exist_ok=True)
+ASSETS_DIR = ROOT / "assets"   # figures the README embeds (tracked in git)
+ASSETS_DIR.mkdir(exist_ok=True)
 
 
 def main() -> None:
@@ -161,9 +163,9 @@ def main() -> None:
             ("Log. Regression\n(|coef|, learned)",     lr_weights,  "#A3BE8C"),
             ("XGBoost\n(learned importances)",         xgb_weights, "#BF616A"),
         ],
-        save_path=str(OUT_DIR / "feature_importance.png"),
+        save_path=str(ASSETS_DIR / "feature_importance.png"),
     )
-    print(f"  -> saved {OUT_DIR / 'feature_importance.png'}")
+    print(f"  -> saved {ASSETS_DIR / 'feature_importance.png'}")
 
     # 7. Save full summary for reproducibility
     summary_path = OUT_DIR / "results.txt"
