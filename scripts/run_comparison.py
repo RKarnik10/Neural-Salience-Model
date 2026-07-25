@@ -35,6 +35,7 @@ from src.baseline import (
     train_baseline,
     train_sklearn_baseline,
 )
+from src.sc_network import sc_channel_importances, torch_available, train_sc_network
 from src.evaluation import evaluate
 from src.visualize import plot_feature_importance_comparison, plot_model_ladder, plot_scene_comparison
 
@@ -60,13 +61,20 @@ def main() -> None:
     rf_result   = train_sklearn_baseline(df, make_random_forest(SEED), seed=SEED)
     mlp_result  = train_sklearn_baseline(df, make_mlp(SEED), seed=SEED)
 
+    # v3: architectural SC network (superficial -> integration -> winner-take-all).
+    # backend="auto" uses PyTorch if installed, else the from-scratch NumPy backend.
+    sc_result   = train_sc_network(df, backend="auto", seed=SEED)
+
     # All models share the same test scenes (deterministic split from seed)
     test_scene_ids = set(baseline.test_scene_ids.tolist())
     test_df = df[df["scene_id"].isin(test_scene_ids)].reset_index(drop=True)
     print(f"  XGBoost  train AUC={baseline.train_auc:.3f}  test AUC={baseline.test_auc:.3f}")
     print(f"  LogReg   train AUC={lr_result.train_auc:.3f}  test AUC={lr_result.test_auc:.3f}")
     print(f"  RandForest train AUC={rf_result.train_auc:.3f}  test AUC={rf_result.test_auc:.3f}")
-    print(f"  MLP      train AUC={mlp_result.train_auc:.3f}  test AUC={mlp_result.test_auc:.3f}\n")
+    print(f"  MLP      train AUC={mlp_result.train_auc:.3f}  test AUC={mlp_result.test_auc:.3f}")
+    print(f"  SC-Net   train AUC={sc_result.train_auc:.3f}  test AUC={sc_result.test_auc:.3f}"
+          f"  [backend={sc_result.backend}, tau={sc_result.model.tau:.2f}]"
+          f"  (torch available: {torch_available()})\n")
 
     # 3. Score every model on the shared test set
     bio_model    = SalienceModel()
@@ -75,6 +83,7 @@ def main() -> None:
     naive_scores = naive_model.predict(test_df)
     bio_scores   = bio_model.predict(test_df)
     lr_scores    = predict_proba_salience(lr_result.model, test_df)
+    sc_scores    = sc_result.model.predict(test_df)
     rf_scores    = predict_proba_salience(rf_result.model, test_df)
     xgb_scores   = predict_salience(baseline.model, test_df, FEATURES)
     mlp_scores   = predict_proba_salience(mlp_result.model, test_df)
@@ -83,6 +92,7 @@ def main() -> None:
     naive_report = evaluate(test_df, naive_scores)
     bio_report   = evaluate(test_df, bio_scores)
     lr_report    = evaluate(test_df, lr_scores)
+    sc_report    = evaluate(test_df, sc_scores)
     rf_report    = evaluate(test_df, rf_scores)
     xgb_report   = evaluate(test_df, xgb_scores)
     mlp_report   = evaluate(test_df, mlp_scores)
@@ -91,6 +101,7 @@ def main() -> None:
     print(f"  {naive_report.pretty('Naive TTC:   ')}")
     print(f"  {lr_report.pretty(  'Log. Reg.:   ')}")
     print(f"  {bio_report.pretty( 'Bio-Inspired:')}")
+    print(f"  {sc_report.pretty(  'SC-Net (v3): ')}")
     print(f"  {rf_report.pretty(  'Rand. Forest:')}")
     print(f"  {xgb_report.pretty( 'XGBoost:     ')}")
     print(f"  {mlp_report.pretty( 'MLP:         ')}\n")
@@ -130,22 +141,25 @@ def main() -> None:
         )
         print(f"  -> saved {OUT_DIR / f'scene_{label}_{sid}.png'}")
 
-    # 6. Feature importance ladder: Bio | Log. Reg. | XGBoost
-    #    Bio uses 4 composite SC features; LR and XGBoost use the 7 raw features.
+    # 6. Feature importance ladder: Bio | SC-Net | Log. Reg. | XGBoost
+    #    Bio and SC-Net both weight the 4 SC channels (fixed vs. learned);
+    #    LR and XGBoost use the 7 raw features.
     bio_weights   = {
         "loom":      bio_model.weights.w_loom,
         "proximity": bio_model.weights.w_proximity,
         "ttc":       bio_model.weights.w_ttc,
         "forward":   bio_model.weights.w_forward,
     }
+    sc_weights  = sc_channel_importances(sc_result.model, test_df)
     lr_weights  = lr_feature_importances(lr_result, list(FEATURES))
     xgb_weights = dict(zip(FEATURES, baseline.model.feature_importances_.tolist()))
 
     plot_model_ladder(
         [
-            ("Bio-Inspired\n(fixed SC weights)",  bio_weights,  "#5E81AC"),
-            ("Log. Regression\n(|coef|, learned)", lr_weights,  "#A3BE8C"),
-            ("XGBoost\n(learned importances)",    xgb_weights,  "#BF616A"),
+            ("Bio-Inspired\n(fixed SC weights)",       bio_weights, "#5E81AC"),
+            ("SC-Net v3\n(learned channel salience)",  sc_weights,  "#B48EAD"),
+            ("Log. Regression\n(|coef|, learned)",     lr_weights,  "#A3BE8C"),
+            ("XGBoost\n(learned importances)",         xgb_weights, "#BF616A"),
         ],
         save_path=str(OUT_DIR / "feature_importance.png"),
     )
@@ -156,10 +170,12 @@ def main() -> None:
     with summary_path.open("w") as f:
         f.write("Neural-Inspired Obstacle Salience Model — Results\n")
         f.write(f"Seed: {SEED}  |  Scenes: {N_SCENES}  |  Test obstacles: {len(test_df)}\n\n")
+        f.write(f"SC-Net backend: {sc_result.backend}  |  learned WTA tau: {sc_result.model.tau:.3f}\n\n")
         f.write("Model ladder (held-out test scenes):\n")
         f.write(naive_report.pretty("Naive TTC:   ") + "\n")
         f.write(lr_report.pretty(  "Log. Reg.:   ") + "\n")
         f.write(bio_report.pretty( "Bio-Inspired:") + "\n")
+        f.write(sc_report.pretty(  "SC-Net (v3): ") + "\n")
         f.write(rf_report.pretty(  "Rand. Forest:") + "\n")
         f.write(xgb_report.pretty( "XGBoost:     ") + "\n")
         f.write(mlp_report.pretty( "MLP:         ") + "\n")
