@@ -17,19 +17,28 @@ The hypothesis this project tests is narrow: *can a fixed, interpretable weighti
 
 ## Results
 
-On 120 held-out test scenes (from a dataset of 600 total, scene-level split), with realistic sensor noise on all features:
+Seven models on 120 held-out test scenes (600 total, scene-level split), with realistic sensor noise on all features. The ladder runs from a zero-shot single-feature floor up to gradient-boosted trees:
 
-| Model              | AUC   | Top-1 accuracy | NDCG@3 | Urgency correlation |
-|--------------------|-------|----------------|--------|---------------------|
-| Bio-Inspired (SC)  | 0.916 | 0.740          | 0.880  | +0.447              |
-| XGBoost baseline   | 0.975 | 0.857          | 0.969  | +0.730              |
-| Random top-1       | —     | ~0.18          | —      | —                   |
+| Model | AUC | Top-1 acc | NDCG@3 | Urgency ρ |
+|---|---|---|---|---|
+| Naive TTC | 0.881 | 0.753 | 0.871 | +0.444 |
+| Logistic Regression | 0.952 | 0.727 | 0.925 | +0.508 |
+| Bio-Inspired (SC) — fixed weights | 0.916 | 0.740 | 0.880 | +0.447 |
+| **SC-Net (v3) — architectural** | **0.964** | **0.844** | **0.953** | **+0.780** |
+| Random Forest | 0.974 | 0.844 | 0.962 | +0.629 |
+| XGBoost | 0.974 | 0.870 | 0.970 | +0.735 |
+| MLP (32→16) | 0.970 | 0.831 | 0.955 | +0.660 |
 
-The bio-inspired model reaches ~86% of XGBoost's NDCG@3 and picks the correct most-urgent threat in 74% of scenes **with no training data whatsoever**. The random baseline for top-1 is ~18% (average 5.5 obstacles per scene).
+Two headline findings:
 
-Equally interesting: when you compare how each model weights features, they converge. XGBoost independently identifies TTC and loom rate as its top two features — matching the SC's known emphasis on looming — despite being given no architectural prior.
+**1. Modeling the SC's architecture closes ~80% of the gap — with no new features.** The v2 bio model was just four fixed SC-literature weights in one weighted sum (NDCG@3 = 0.880). v3 keeps those exact four bio channels as a fixed "superficial" layer, then adds two things the SC actually does: an integration layer that models feature *interactions* (coincidence detection), and a *winner-take-all* competition between obstacles. That lifts NDCG@3 to **0.953** — closing **81%** of the distance to XGBoost (0.970) — and matches Random Forest on top-1 accuracy, while staying interpretable and traceable to neuroscience.
+
+**2. The winner-take-all competition makes it the best-calibrated model on urgency.** SC-Net's urgency correlation (**+0.780**) is the highest in the whole ladder — above XGBoost's (+0.735). Because it's trained under a within-scene competition (a listwise objective standing in for lateral inhibition), it is explicitly optimized to order obstacles by how soon you'd reach them — exactly what the urgency metric measures, and what the SC evolved to do.
+
+When you compare where each model puts its weight, they converge on the same physics. XGBoost independently ranks TTC and loom rate at the top — matching the SC's known emphasis on looming — with no architectural prior. And when SC-Net is allowed to *learn* the weighting of the four bio channels rather than using the fixed literature values, it promotes TTC and proximity and demotes loom: on this task, once TTC is present, loom's marginal contribution is small (both encode "approaching fast"). The fixed SC prior isn't optimal, but it lands in the right neighborhood.
 
 ![feature importance comparison](data/feature_importance.png)
+*Where each model puts its weight. The first two panels weight the same four SC channels — fixed (bio) vs. learned (SC-Net); the last two weight the seven raw features.*
 
 ## Project structure
 
@@ -37,14 +46,16 @@ Equally interesting: when you compare how each model weights features, they conv
 neural-salience-model/
 ├── src/
 │   ├── synthetic.py      # Scene generator + sensor noise + ground-truth labeler
-│   ├── salience.py       # Bio-inspired SC model (interpretable, zero-shot)
-│   ├── baseline.py       # XGBoost classifier, scene-level train/test split
+│   ├── salience.py       # Bio-inspired SC model — fixed weights, zero-shot (v2)
+│   ├── sc_network.py     # Architectural SC net — NumPy + optional PyTorch backend (v3)
+│   ├── baseline.py       # Learned baselines: XGBoost, LogReg, RandomForest, MLP, naive TTC
 │   ├── evaluation.py     # AUC, top-1, NDCG@3, urgency correlation
 │   └── visualize.py      # Per-scene polar plots + feature-weight comparison
 ├── scripts/
-│   └── run_comparison.py # End-to-end pipeline
+│   └── run_comparison.py # End-to-end pipeline (full 7-model ladder)
 ├── tests/
-│   └── test_pipeline.py  # Basic sanity tests
+│   ├── test_pipeline.py    # Data / bio-model / baseline / evaluation sanity tests
+│   └── test_sc_network.py  # SC-net gradient check, training, backend parity
 └── data/                 # Outputs land here (plots, results.txt)
 ```
 
@@ -57,6 +68,8 @@ python scripts/run_comparison.py
 
 Outputs land in `data/`: two example scene visualizations (one where the models agree, one where they disagree), a feature-importance comparison, and a plain-text results summary.
 
+**PyTorch is optional.** The v3 SC network ships with two interchangeable backends behind one interface. If `torch` is installed it is used automatically; otherwise the model falls back to a dependency-free NumPy implementation with hand-written backprop and a small Adam optimizer. Pick explicitly with `SCNetwork(backend="numpy" | "torch" | "auto")`. Everything in the default `requirements.txt` runs the NumPy backend.
+
 ## Task setup
 
 A *scene* is a snapshot of a user walking forward at 1.4 m/s with 3–8 obstacles around them. Each obstacle has position, velocity, and size. Ground-truth threat labels are computed by **forward-simulating** the straight-line user trajectory for 3 seconds; an obstacle is a "threat" if the user would enter its personal-space radius within that horizon. The rank-1 threat is the one with the smallest time-to-collision.
@@ -65,20 +78,62 @@ The features both models see — distance, angle, radial velocity, tangential ve
 
 ## Why the comparison is fair
 
-The two models see identical inputs (same noisy features, same scenes). They differ only in how they turn those inputs into a salience score:
+Every model sees identical inputs (same noisy features, same scenes). They differ only in how they turn those inputs into a salience score:
 
 - **Bio-inspired** uses a fixed linear combination of four transformed feature scores with coefficients taken from the SC literature. No training.
-- **XGBoost** learns a tree ensemble from 480 labeled training scenes, evaluated on 120 held-out scenes.
+- **SC-Net (v3)** reuses those exact four bio channels as a fixed superficial layer, then learns an integration layer (with interaction terms) and a winner-take-all competition on top. Trained on the labeled training scenes.
+- **XGBoost, Random Forest, MLP, Logistic Regression** each learn from 480 labeled training scenes.
 
-Evaluation is on the same test scenes for both models.
+All learned models — SC-Net included — share the same scene-level 80/20 split (same seed), and every model is evaluated on the same 120 held-out test scenes, so the numbers are directly comparable.
 
 ## Planned extensions
 
-- **Neural upgrade.** Replace the hand-crafted combination with a small network modeling SC layer structure (superficial sensory layer + intermediate integration + winner-take-all output). Target: narrow the gap to XGBoost on NDCG@3 while keeping biological plausibility.
+- ~~**Neural upgrade.**~~ **Done in v3** (`src/sc_network.py`): a small network modeling SC layer structure — superficial sensory layer → intermediate integration → winner-take-all output — that narrows the NDCG@3 gap to XGBoost while staying biologically plausible. See the [v3 changelog](#v3--architectural-sc-network-2026-07-24).
+- **Recurrent WTA dynamics.** v3's winner-take-all is a single-shot softmax trained under a competitive objective. The real SC settles a winner through *recurrent* lateral inhibition over tens of milliseconds. A next version could unroll that dynamic and read out the settled state, which may sharpen top-1 further.
 - **Real sensor data.** Swap the synthetic generator for ultrasonic/LIDAR traces. The noise model is already designed to approximate what real sensors produce.
 - **Temporal dynamics.** Current scenes are snapshots. The SC integrates over time — next version should ingest short trajectories so the model can pick up looming dynamics directly rather than through a derived feature.
 
 ## Changelog
+
+### v3 — Architectural SC network (2026-07-24)
+
+**Why:** v2 proved the SC's *feature weighting* is a competitive prior, and predicted that the remaining gap to the tree models is (a) feature interactions and (b) the one biological mechanism no model in the ladder had yet — within-scene competition. v3 tests that prediction directly: does modeling the SC's *processing structure* add performance on top of just having the right feature weights? Answer: yes, most of it.
+
+**The model (`src/sc_network.py`).** A small network whose architecture maps onto SC anatomy rather than a generic MLP:
+
+| Stage | SC analogue | What it does |
+|---|---|---|
+| Superficial layer | sensory receptive fields | The four fixed SC transforms from `SalienceModel` (loom, proximity, ttc, forward). Kept fixed, so v3 isolates the *architectural* contribution. |
+| Integration layer | intermediate-layer coincidence detection | Four channels **plus their six pairwise products**, through a small tanh hidden layer. This is where interactions live. |
+| Winner-take-all output | lateral inhibition | A within-scene softmax at a learnable temperature, trained as a listwise objective so competition shapes the representation — not just an inference-time cosmetic. |
+
+**Two interchangeable backends, one interface.** A from-scratch **NumPy** backend (forward pass + hand-derived backprop + a small Adam optimizer, verified by a finite-difference gradient check) and an optional **PyTorch** backend (`nn`-style module + autograd). `backend="auto"` uses PyTorch if installed, else NumPy. Same architecture, config, loss, and results.
+
+**Updated results (v3) — 120 held-out test scenes:**
+
+| Model | AUC | Top-1 acc | NDCG@3 | Urgency ρ |
+|---|---|---|---|---|
+| Naive TTC | 0.881 | 0.753 | 0.871 | +0.444 |
+| Log. Regression | 0.952 | 0.727 | 0.925 | +0.508 |
+| Bio-Inspired (SC) | 0.916 | 0.740 | 0.880 | +0.447 |
+| **SC-Net (v3)** | **0.964** | **0.844** | **0.953** | **+0.780** |
+| Random Forest | 0.974 | 0.844 | 0.962 | +0.629 |
+| XGBoost | 0.974 | 0.870 | 0.970 | +0.735 |
+| MLP (32→16) | 0.970 | 0.831 | 0.955 | +0.660 |
+
+**Key findings:**
+
+- **The architecture closes 81% of the NDCG@3 gap** (0.880 → 0.953 against XGBoost's 0.970) using the *same* four bio channels — confirming v2's prediction that the missing ingredient was interaction structure, not more features.
+- **SC-Net is the best model in the ladder on urgency correlation** (+0.780 vs. XGBoost's +0.735). The winner-take-all listwise objective directly optimizes within-scene urgency ordering — the SC's actual job.
+- **It is not a generic MLP.** The v2 MLP (raw features, no competition) sits at NDCG@3 = 0.955 / urgency +0.660; SC-Net matches it on ranking while beating it decisively on urgency, using interpretable bio channels. The biological structure is doing specific work.
+- **Learned channel weights re-rank the SC prior:** given the chance to learn, the net promotes TTC and proximity and demotes loom (once TTC is present, loom is largely redundant). The fixed SC weights are close but not optimal.
+
+**Code changes:**
+
+- `src/sc_network.py` (new): `SCNetwork` wrapper, `_NumpySC` / `_TorchSC` backends, `SCConfig`, `superficial_channels()`, `interaction_features()`, `train_sc_network()`, and `sc_channel_importances()`.
+- `scripts/run_comparison.py`: added SC-Net to the ladder (now 7 models), added its learned channel-salience panel to the feature-importance figure, and logged the backend + learned WTA temperature to `results.txt`.
+- `tests/test_sc_network.py` (new): finite-difference gradient check, fit-reduces-loss, probability-range, beats-naive-floor, normalized channel importances, and (when torch is installed) NumPy↔PyTorch parity.
+- `requirements.txt`: documented `torch` as an optional dependency.
 
 ### v2 — Full model ladder (2026-04-30)
 
