@@ -1,10 +1,25 @@
 # Model Comparison Analysis
 
-Results from v2 ladder run (2026-04-30, seed=0, 600 scenes, 120 test scenes).
+The running analysis log for this project — the reasoning behind each version,
+not just its numbers. **Current through v3** (2026-07-24).
+
+**How to read this document.** It is written in the order the work happened, so
+the framing shifts as you go down:
+
+- **Sections 1–5** (pros/cons through "What v2 actually proved") are the **v2**
+  analysis, from the ladder run of 2026-04-30 — seed 0, 600 scenes, 120 test
+  scenes, six models. Their tables and claims deliberately **exclude SC-Net**,
+  which did not exist yet. They are kept as written because the v2 *prediction*
+  is what v3 tests, and rewriting it after the fact would destroy the evidence.
+- **"What the architectural SC network would test (v3)"** is that prediction,
+  recorded before the experiment was run.
+- **The final section is the v3 result** (2026-07-24, same seed and split),
+  which confirms it. **For current numbers, read that section** — or
+  `data/results.txt`, which the pipeline regenerates on every run.
 
 ---
 
-## Model Pros & Cons
+## Model Pros & Cons *(v2 analysis — six models, no SC-Net)*
 
 ### Naive TTC
 - **Pros:** Zero complexity, zero training, surprisingly competitive (NDCG@3=0.871). If you had to ship something today with no infrastructure, this works.
@@ -38,7 +53,7 @@ Results from v2 ladder run (2026-04-30, seed=0, 600 scenes, 120 test scenes).
 
 ---
 
-## Results Table
+## Results Table *(v2 — superseded; see the v3 section at the end)*
 
 | Model | AUC | Top-1 acc | NDCG@3 | Urgency ρ |
 |---|---|---|---|---|
@@ -148,4 +163,4 @@ If yes, that's strong evidence the SC's design is computationally justified end-
 
 **The negative-result guard still holds.** v2 worried that a bigger network would just be "XGBoost with worse interpretability." SC-Net rules that out from the other side: it matches the generic v2 MLP on ranking (0.953 vs 0.955) while beating it on urgency (+0.780 vs +0.660), using interpretable bio channels and an architecture every stage of which maps to SC anatomy. The performance comes from *biological structure*, not from being a neural net.
 
-**What's left for v4.** The remaining ~1.5 NDCG@3 points to XGBoost are the deepest interaction structure and, plausibly, the difference between a single-shot softmax and a *recurrent* lateral-inhibition dynamic that settles a winner over time. That, plus temporal input (trajectories instead of snapshots), is the natural next test.
+**What's left for v4.** The remaining ~1.7 NDCG@3 points to XGBoost (0.953 vs. 0.970) are the deepest interaction structure and, plausibly, the difference between a single-shot softmax and a *recurrent* lateral-inhibition dynamic that settles a winner over time. That, plus temporal input (trajectories instead of snapshots), is the natural next test.

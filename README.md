@@ -2,7 +2,19 @@
 
 A computational model of how the mammalian **superior colliculus** (SC) prioritizes spatial threats, benchmarked against a standard XGBoost baseline on a simulated navigation task.
 
-This project is a direct extension of **OMAR** — an obstacle-detection device I built for a visually impaired user — into the neuroscience underneath it. OMAR solved the engineering problem of turning sensor readings into audio cues. This model asks the deeper question: *given the same sensor input, how should the brain decide which obstacle to attend to first?*
+This project is a direct extension of **OMAR** — an obstacle-detection device I built for a visually impaired user — into the neuroscience underneath it. OMAR solved the engineering problem of turning sensor readings into audio cues. This model asks the deeper question: *Given the same sensor input, how should the brain decide which obstacle to attend to first?*
+
+## Status
+
+**v3 — complete and merged** (2026-07-24). Seven-model ladder runs end to end; test suite green (17 passed, 1 skipped — the PyTorch parity check, which skips by design when `torch` isn't installed). Nothing is in flight: no half-finished branch, no failing test. The numbers in this README are reproduced by `python scripts/run_comparison.py` and match `data/results.txt`.
+
+| Version | Date | What it established |
+|---|---|---|
+| v2 | 2026-04-30 | The SC's **feature weighting** — four fixed literature weights, zero training — is a competitive prior. Predicted the remaining gap to the tree models was *feature interactions*. |
+| **v3** | **2026-07-24** | Tested that prediction by modeling the SC's **architecture** on the same four channels. Confirmed: closed 81% of the NDCG@3 gap, and produced the best urgency correlation in the ladder — XGBoost included. |
+| v4 | not started | Recurrent winner-take-all dynamics, then temporal input. See [Planned extensions](#planned-extensions). |
+
+Working context for contributors (and for AI assistants reading this repo) lives in [`CLAUDE.md`](CLAUDE.md); the long-form reasoning log — per-model pros and cons, what each version proved, what to test next — is in [`data/model_analysis.md`](data/model_analysis.md).
 
 ## Motivation
 
@@ -13,7 +25,7 @@ The superior colliculus is a midbrain structure that orients attention toward th
 3. **Forward / heading bias.** The SC is retinotopic with foveal over-representation — for a navigator, "things in your path" get more representation than peripheral ones.
 4. **Winner-take-all dynamics.** Lateral inhibition collapses many candidate signals onto a single attended target.
 
-The hypothesis this project tests is narrow: *can a fixed, interpretable weighting of bio-inspired features get close to a trained gradient-boosted classifier on a realistic threat-ranking task, with zero training data?*
+The hypothesis this project tests is narrow: *Can a fixed, interpretable weighting of bio-inspired features get close to a trained gradient-boosted classifier on a realistic threat-ranking task, with zero training data?*
 
 ## Results
 
@@ -44,6 +56,7 @@ When you compare where each model puts its weight, they converge on the same phy
 
 ```
 neural-salience-model/
+├── CLAUDE.md             # Working context: current state, invariants, what's next
 ├── src/
 │   ├── synthetic.py      # Scene generator + sensor noise + ground-truth labeler
 │   ├── salience.py       # Bio-inspired SC model — fixed weights, zero-shot (v2)
@@ -56,17 +69,22 @@ neural-salience-model/
 ├── tests/
 │   ├── test_pipeline.py    # Data / bio-model / baseline / evaluation sanity tests
 │   └── test_sc_network.py  # SC-net gradient check, training, backend parity
-└── data/                 # Outputs land here (plots, results.txt)
+├── assets/
+│   └── feature_importance.png  # Tracked — the figure this README embeds
+└── data/
+    ├── model_analysis.md   # Tracked — long-form analysis log across versions
+    └── ...                 # Run artifacts land here (scene plots, results.txt) — gitignored
 ```
 
 ## Quickstart
 
 ```bash
 pip install -r requirements.txt
-python scripts/run_comparison.py
+python scripts/run_comparison.py     # full 7-model ladder — runs in seconds
+python -m pytest -q                  # 17 passed, 1 skipped
 ```
 
-Outputs land in `data/`: two example scene visualizations (one where the models agree, one where they disagree), a feature-importance comparison, and a plain-text results summary.
+Run from the repo root. Outputs land in `data/` (gitignored): two example scene visualizations — one where the models agree on the top threat, one where they disagree — and a plain-text results summary. The feature-importance comparison is written to `assets/` instead, since this README embeds it and it needs to be tracked to render on GitHub.
 
 **PyTorch is optional.** The v3 SC network ships with two interchangeable backends behind one interface. If `torch` is installed it is used automatically; otherwise the model falls back to a dependency-free NumPy implementation with hand-written backprop and a small Adam optimizer. Pick explicitly with `SCNetwork(backend="numpy" | "torch" | "auto")`. Everything in the default `requirements.txt` runs the NumPy backend.
 
